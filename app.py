@@ -1,91 +1,88 @@
 import pandas as pd
 import streamlit as st
+from io import BytesIO
 
-def process_hc_file(hc_file):
-    """معالجة وتحقق من ملف HC"""
+# إعداد صفحة Streamlit
+st.set_page_config(page_title="نظام تحليل AHT", layout="wide")
+st.title("📊 نظام تحليل وقت التعامل (AHT)")
+
+# قسم رفع الملفات - في عمود جانبي
+with st.sidebar:
+    st.header("📤 رفع الملفات المطلوبة")
+    
+    # رفع ملفات Raw Data
+    raw_overall_file = st.file_uploader("ملف البيانات الرئيسي (Raw Overall)", type=['xlsx', 'csv'])
+    raw_urdu_file = st.file_uploader("ملف بيانات الأردية (Raw Urdu)", type=['xlsx', 'csv'])
+    
+    # رفع ملف HC
+    hc_file = st.file_uploader("ملف الموظفين (HC)", type=['xlsx', 'csv'])
+    
+    # إعدادات AHT
+    st.header("⚙️ إعدادات AHT")
+    target_aht = st.number_input("هدف AHT (بالثواني)", min_value=0, value=300, step=1)
+    min_aht = st.number_input("الحد الأدنى لـ AHT", min_value=0, value=180, step=1)
+    max_aht = st.number_input("الحد الأقصى لـ AHT", min_value=0, value=600, step=1)
+
+# قسم التحليل الرئيسي
+if raw_overall_file and raw_urdu_file:
     try:
-        # قراءة الملف
-        df_hc = pd.read_excel(hc_file) if hc_file.name.endswith('.xlsx') else pd.read_csv(hc_file)
+        # قراءة الملفات
+        df_overall = pd.read_excel(raw_overall_file) if raw_overall_file.name.endswith('.xlsx') else pd.read_csv(raw_overall_file)
+        df_urdu = pd.read_excel(raw_urdu_file) if raw_urdu_file.name.endswith('.xlsx') else pd.read_csv(raw_urdu_file)
         
-        # تنظيف أسماء الأعمدة (إزالة فراغات، تحويل لحروف صغيرة)
-        df_hc.columns = df_hc.columns.str.strip().str.lower()
+        # معالجة ملف HC إذا موجود
+        df_hc = None
+        if hc_file:
+            df_hc = pd.read_excel(hc_file) if hc_file.name.endswith('.xlsx') else pd.read_csv(hc_file)
         
-        # خريطة لأسماء الأعمدة البديلة المقبولة
-        column_aliases = {
-            'employee_id': ['id', 'employee id', 'emp_id', 'رقم الموظف'],
-            'team_leader': ['tl', 'team leader', 'المشرف', 'المشرف المسؤول']
-        }
-        
-        # البحث عن أعمدة مطابقة
-        found_columns = {}
-        for standard_col, aliases in column_aliases.items():
-            for alias in aliases:
-                if alias.lower() in df_hc.columns:
-                    found_columns[standard_col] = alias
-                    break
-        
-        # إذا لم نجد جميع الأعمدة المطلوبة
-        if len(found_columns) < 2:
-            missing = set(column_aliases.keys()) - set(found_columns.keys())
-            st.error(f"ملف HC ينقصه الأعمدة التالية: {', '.join(missing)}")
-            st.markdown("""
-            **ملاحظات مهمة:**
-            - يجب أن يحتوي ملف HC على الأعمدة التالية (أو ما يعادلها):
-              - `Employee_ID` (أو: ID, Employee ID, Emp_ID, رقم الموظف)
-              - `Team_Leader` (أو: TL, Team Leader, المشرف, المشرف المسؤول)
-            - يمكنك تنزيل نموذج ملف HC باستخدام الزر أدناه
-            """)
+        # حساب AHT (مثال - يمكن تعديله حسب هيكل بياناتك)
+        if 'Handle_Time' in df_overall.columns:
+            # حساب AHT لكل موظف/فريق
+            aht_results = df_overall.groupby('Agent_Name')['Handle_Time'].mean().reset_index()
+            aht_results = aht_results.rename(columns={'Handle_Time': 'AHT'})
             
-            # زر لتنزيل نموذج
-            sample_hc = pd.DataFrame(columns=['Employee_ID', 'Team_Leader'])
-            st.download_button(
-                label="⬇️ تنزيل نموذج ملف HC",
-                data=sample_hc.to_csv(index=False),
-                file_name="hc_template.csv",
-                mime="text/csv"
-            )
-            return None
-        
-        # إعادة تسمية الأعمدة للشكل القياسي
-        df_hc = df_hc.rename(columns=found_columns)
-        
-        # تنظيف البيانات
-        df_hc['employee_id'] = df_hc['employee_id'].astype(str).str.strip()
-        df_hc['team_leader'] = df_hc['team_leader'].astype(str).str.strip()
-        
-        return df_hc[['employee_id', 'team_leader']]
-    
-    except Exception as e:
-        st.error(f"حدث خطأ أثناء قراءة ملف HC: {str(e)}")
-        return None
-
-def main():
-    st.title("نظام تحليل الأداء - إدارة ملف HC")
-    
-    # رفع الملف
-    hc_file = st.file_uploader("رفع ملف HC (الموظفين والمشرفين)", 
-                             type=['xlsx', 'csv'],
-                             help="يجب أن يحتوي على عمود للموظفين (Employee_ID) وعمود للمشرفين (Team_Leader)")
-    
-    if hc_file:
-        df_hc = process_hc_file(hc_file)
-        
-        if df_hc is not None:
-            st.success("تم تحميل ملف HC بنجاح!")
-            st.dataframe(df_hc.head())
+            # تصفية حسب الحدود المدخلة
+            aht_results = aht_results[(aht_results['AHT'] >= min_aht) & (aht_results['AHT'] <= max_aht)]
             
-            # عرض إحصاءات
-            st.subheader("إحصاءات ملف HC")
-            col1, col2 = st.columns(2)
+            # عرض النتائج
+            st.header("📈 نتائج تحليل AHT")
+            
+            # عرض في أعمدة
+            col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("عدد الموظفين", len(df_hc))
-                
-            with col2:
-                st.metric("عدد المشرفين", df_hc['team_leader'].nunique())
+                avg_aht = aht_results['AHT'].mean()
+                st.metric("متوسط AHT", f"{avg_aht:.2f} ثانية", delta=f"{avg_aht-target_aht:.2f} vs الهدف")
             
-            # عرض توزيع المشرفين
-            st.bar_chart(df_hc['team_leader'].value_counts())
-
-if __name__ == "__main__":
-    main()
+            with col2:
+                min_agent = aht_results.loc[aht_results['AHT'].idxmin()]
+                st.metric("أفضل أداء", f"{min_agent['AHT']:.2f} ث", min_agent['Agent_Name'])
+            
+            with col3:
+                max_agent = aht_results.loc[aht_results['AHT'].idxmax()]
+                st.metric("أضعف أداء", f"{max_agent['AHT']:.2f} ث", max_agent['Agent_Name'])
+            
+            # عرض جدول البيانات
+            st.dataframe(aht_results.sort_values('AHT'), height=400)
+            
+            # تحميل النتائج
+            st.download_button(
+                label="⬇️ تنزيل نتائج AHT",
+                data=aht_results.to_csv(index=False),
+                file_name="aht_results.csv",
+                mime="text/csv"
+            )
+        else:
+            st.error("الملف الرئيسي لا يحتوي على عمود Handle_Time لحساب AHT")
+    
+    except Exception as e:
+        st.error(f"حدث خطأ في معالجة البيانات: {str(e)}")
+else:
+    st.warning("الرجاء رفع الملفات المطلوبة لبدء التحليل")
+    st.info("""
+    **تعليمات رفع الملفات:**
+    1. اختر ملف البيانات الرئيسي (Raw Overall)
+    2. اختر ملف بيانات الأردية (Raw Urdu)
+    3. (اختياري) اختر ملف الموظفين (HC)
+    4. اضبط إعدادات AHT حسب احتياجاتك
+    """)
