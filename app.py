@@ -2,12 +2,37 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Border, Side, Alignment, Font
 from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.worksheet.dimensions import ColumnDimension, DimensionHolder
-from openpyxl.utils import get_column_letter
 import streamlit as st
+import numpy as np
 
-def create_excel_template(output_path):
-    # إنشاء مصنف جديد
+def calculate_metrics(df_report1, df_report2, df_hc):
+    """دالة لحساب المقاييس المطلوبة"""
+    # هنا نقوم بدمج البيانات وإجراء الحسابات
+    # يمكنك تعديل هذه الدالة حسب احتياجاتك الدقيقة
+    
+    # مثال لحساب بعض القيم (يجب تعديله حسب منطق عملك)
+    df_combined = pd.concat([df_report1, df_report2])
+    
+    # حساب المتوسطات
+    aht_score = df_combined['AHT'].mean() if 'AHT' in df_combined.columns else 0
+    chats_arabic = df_combined['Arabic_Chats'].sum() if 'Arabic_Chats' in df_combined.columns else 0
+    chats_urdu = df_combined['Urdu_Chats'].sum() if 'Urdu_Chats' in df_combined.columns else 0
+    
+    # حساب النسب المئوية
+    pass_rate = (df_combined['Pass'].sum() / df_combined['Chats'].sum()) * 100 if 'Chats' in df_combined.columns else 0
+    fail_rate = (df_combined['Fail'].sum() / df_combined['Chats'].sum()) * 100 if 'Chats' in df_combined.columns else 0
+    
+    return {
+        'aht_score': aht_score,
+        'chats_arabic': chats_arabic,
+        'chats_urdu': chats_urdu,
+        'pass_rate': pass_rate,
+        'fail_rate': fail_rate,
+        'var_from_target': aht_score - 300  # مثال: assuming target is 300
+    }
+
+def create_excel_report(data, output_path):
+    """إنشاء تقرير إكسل مع القيم المحسوبة"""
     wb = Workbook()
     
     # إزالة الورقة الافتراضية
@@ -20,11 +45,8 @@ def create_excel_template(output_path):
     # تعريف الأنماط
     header_fill = PatternFill(start_color="FF7030A0", end_color="FF7030A0", fill_type="solid")
     light_purple_fill = PatternFill(start_color="FFE4D9F5", end_color="FFE4D9F5", fill_type="solid")
-    white_fill = PatternFill(start_color="FFFFFFFF", end_color="FFFFFFFF", fill_type="solid")
-    thin_border = Border(left=Side(style='thin'), 
-                         right=Side(style='thin'), 
-                         top=Side(style='thin'), 
-                         bottom=Side(style='thin'))
+    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                         top=Side(style='thin'), bottom=Side(style='thin'))
     center_alignment = Alignment(horizontal='center', vertical='center')
     header_font = Font(bold=True, color="FFFFFF")
     
@@ -36,7 +58,7 @@ def create_excel_template(output_path):
         "Missed", "", "Chats", "Pass", "Fail"
     ]
     
-    # إضافة العناوين إلى ورقة View
+    # إضافة العناوين
     for col_num, header in enumerate(view_headers, 1):
         cell = view_sheet.cell(row=1, column=col_num, value=header)
         cell.fill = header_fill
@@ -44,128 +66,71 @@ def create_excel_template(output_path):
         cell.border = thin_border
         cell.alignment = center_alignment
     
-    # تعيين عرض الأعمدة لورقة View
-    view_column_widths = {
-        'A': 25, 'B': 8, 'C': 8, 'D': 18, 'E': 12, 'F': 12, 'G': 15, 'H': 12,
-        'I': 15, 'J': 10, 'K': 10, 'L': 8, 'M': 5, 'N': 5, 'O': 5, 'P': 5,
-        'Q': 5, 'R': 5, 'S': 5, 'T': 10, 'U': 5, 'V': 8, 'W': 5, 'X': 8,
-        'Y': 8, 'Z': 8
-    }
+    # تعبئة البيانات المحسوبة
+    # قسم TL
+    view_sheet.cell(row=2, column=4, value=data['aht_score']).number_format = '0.00'
+    view_sheet.cell(row=2, column=7, value=data['chats_arabic'])
+    view_sheet.cell(row=2, column=8, value=data['chats_urdu'])
+    view_sheet.cell(row=2, column=9, value=data['var_from_target']).number_format = '0.00'
+    view_sheet.cell(row=2, column=24, value=data['chats_arabic'] + data['chats_urdu'])
+    view_sheet.cell(row=2, column=25, value=round((data['pass_rate']/100) * (data['chats_arabic'] + data['chats_urdu'])))
+    view_sheet.cell(row=2, column=26, value=round((data['fail_rate']/100) * (data['chats_arabic'] + data['chats_urdu']))
     
-    for col, width in view_column_widths.items():
-        view_sheet.column_dimensions[col].width = width
+    # قسم BPO (مثال)
+    view_sheet.cell(row=26, column=4, value=data['aht_score']).number_format = '0.00'
+    view_sheet.cell(row=26, column=7, value=data['chats_arabic'])
+    view_sheet.cell(row=26, column=8, value=data['chats_urdu'])
+    view_sheet.cell(row=26, column=24, value=data['chats_arabic'] + data['chats_urdu'])
+    view_sheet.cell(row=26, column=25, value=round((data['pass_rate']/100) * (data['chats_arabic'] + data['chats_urdu'])))
+    view_sheet.cell(row=26, column=26, value=round((data['fail_rate']/100) * (data['chats_arabic'] + data['chats_urdu'])))
     
-    # إضافة أقسام البيانات النموذجية (مشابهة للمثال الخاص بك)
-    sections = [
-        ("TL", 23),
-        ("SPV", 4),
-        ("Tenurity", 5),
-        ("BPO", 1),
-        ("country", 7),
-        ("Timing", 5),
-        ("CR", 38)
-    ]
-    
-    current_row = 2
-    for section, row_count in sections:
-        view_sheet.cell(row=current_row, column=1, value=section).fill = light_purple_fill
-        for row in range(current_row, current_row + row_count):
-            for col in range(1, 27):  # الأعمدة من A إلى Z
-                cell = view_sheet.cell(row=row, column=col)
-                cell.border = thin_border
-                cell.alignment = center_alignment
-                if col > 1:
-                    cell.value = "-" if col not in [20, 21, 22, 24, 25, 26] else 0
-        current_row += row_count + 1
-    
-    # حالة خاصة لقسم BPO
-    view_sheet['K26'].value = "#DIV/0!"
-    view_sheet['X26'].value = 32762
-    view_sheet['Y26'].value = 32762
-    
-    # حالة خاصة لقسم country
-    for row in range(30, 37):
-        view_sheet.cell(row=row, column=11).value = "#DIV/0!"
-    
-    # إنشاء ورقة Agent View
-    agent_sheet = wb.create_sheet("Agent View")
-    
-    # عناوين ورقة Agent View
-    agent_headers = [
-        "HR ID", "Full Name", "Email", "TL", "SPV", "AHT Score", "FRT", 
-        "# Chats", "Var From Target", "Status", "Pass", "Fail", "Readiness"
-    ]
-    
-    # إضافة العناوين إلى ورقة Agent View
-    for col_num, header in enumerate(agent_headers, 1):
-        cell = agent_sheet.cell(row=1, column=col_num, value=header)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.border = thin_border
-        cell.alignment = center_alignment
-    
-    # تعيين عرض الأعمدة لورقة Agent View
-    agent_column_widths = {
-        'A': 8, 'B': 45, 'C': 45, 'D': 15, 'E': 15, 'F': 12, 'G': 8,
-        'H': 10, 'I': 15, 'J': 10, 'K': 8, 'L': 8, 'M': 12
-    }
-    
-    for col, width in agent_column_widths.items():
-        agent_sheet.column_dimensions[col].width = width
-    
-    # إضافة بيانات نموذجية إلى Agent View
-    sample_agent_data = [
-        [4768, "Ahmed Mohamed Saber Abdelhamid Ahmed", "ahmed.mohamed.2449_bseg.ext@talabat.com", 
-         "Michael Fawzy", "Mohamed Hamada", "-", "-", 0, "-", "Achieved", 0, 0, "-"],
-        [1301, "Mohamed Mousa Ramdan Hassan", "mohamed.mousa.d12_bseg.ext@talabat.com", 
-         "Michael Fawzy", "Mohamed Hamada", "-", "-", 0, "-", "Achieved", 0, 0, "-"],
-        [4127, "Mohamed Yehia Youssef Ahmed Nagaty", "mohamed.youssef.2445_bseg.ext@talabat.com", 
-         "Michael Fawzy", "Mohamed Hamada", "-", "-", 0, "-", "Achieved", 0, 0, "-"],
-        [4761, "Helena Ishak Sabet Ishak", "helena.ishak.2449_bseg.ext@talabat.com", 
-         "Michael Fawzy", "Mohamed Hamada", "-", "-", 0, "-", "Achieved", 0, 0, "-"],
-        [4060, "Basmala Samer Ibrahim Havez", "basmala.samer.2444_bseg.ext@talabat.com", 
-         "Michael Fawzy", "Mohamed Hamada", "-", "-", 0, "-", "Achieved", 0, 0, "-"]
-    ]
-    
-    for row_num, row_data in enumerate(sample_agent_data, 2):
-        for col_num, cell_value in enumerate(row_data, 1):
-            cell = agent_sheet.cell(row=row_num, column=col_num, value=cell_value)
-            cell.border = thin_border
-            cell.alignment = center_alignment
-    
-    # حفظ المصنف
+    # حفظ الملف
     wb.save(output_path)
 
 def main():
-    st.title("منشئ تقارير إكسل")
-    st.write("هذه الأداة تنشئ تقارير إكسل بالتنسيق المحدد.")
+    st.title("نظام تحليل أداء خدمة العملاء")
+    st.write("يرجى رفع الملفات المطلوبة لإنشاء التقرير")
     
-    # أدوات رفع الملفات
-    report1 = st.file_uploader("رفع التقرير 1", type=['xlsx', 'csv'])
-    report2 = st.file_uploader("رفع التقرير 2", type=['xlsx', 'csv'])
-    hc_file = st.file_uploader("رفع ملف HC", type=['xlsx', 'csv'])
-    
-    output_filename = st.text_input("اسم ملف الإخراج (بدون امتداد)", "output_report")
+    # رفع الملفات
+    report1 = st.file_uploader("التقرير الأول (Excel/CSV)", type=['xlsx', 'csv'])
+    report2 = st.file_uploader("التقرير الثاني (Excel/CSV)", type=['xlsx', 'csv'])
+    hc_file = st.file_uploader("ملف HC (Excel/CSV)", type=['xlsx', 'csv'])
     
     if st.button("إنشاء التقرير"):
-        if not report1 or not report2 or not hc_file:
-            st.warning("الرجاء رفع جميع الملفات المطلوبة")
+        if report1 and report2 and hc_file:
+            try:
+                # قراءة الملفات
+                df1 = pd.read_excel(report1) if report1.name.endswith('.xlsx') else pd.read_csv(report1)
+                df2 = pd.read_excel(report2) if report2.name.endswith('.xlsx') else pd.read_csv(report2)
+                df_hc = pd.read_excel(hc_file) if hc_file.name.endswith('.xlsx') else pd.read_csv(hc_file)
+                
+                # حساب المقاييس
+                metrics = calculate_metrics(df1, df2, df_hc)
+                
+                # إنشاء التقرير
+                output_path = "customer_performance_report.xlsx"
+                create_excel_report(metrics, output_path)
+                
+                # عرض النتائج
+                st.success("تم إنشاء التقرير بنجاح!")
+                st.write("ملخص النتائج:")
+                st.write(f"متوسط AHT: {metrics['aht_score']:.2f}")
+                st.write(f"عدد المحادثات العربية: {metrics['chats_arabic']}")
+                st.write(f"عدد المحادثات الأردية: {metrics['chats_urdu']}")
+                st.write(f"معدل النجاح: {metrics['pass_rate']:.2f}%")
+                
+                # زر التنزيل
+                with open(output_path, "rb") as f:
+                    st.download_button(
+                        label="تنزيل التقرير",
+                        data=f,
+                        file_name=output_path,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+            except Exception as e:
+                st.error(f"حدث خطأ: {str(e)}")
         else:
-            # معالجة الملفات وإنشاء المخرجات
-            output_path = f"{output_filename}.xlsx"
-            create_excel_template(output_path)
-            
-            # هنا يمكنك إضافة منطق المعالجة الفعلي للبيانات
-            # حالياً، نقوم فقط بإنشاء قالب
-            
-            st.success("تم إنشاء التقرير بنجاح! يمكنك تنزيل الملف أدناه.")
-            with open(output_path, "rb") as f:
-                st.download_button(
-                    label="تنزيل تقرير إكسل",
-                    data=f,
-                    file_name=output_path,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+            st.warning("الرجاء رفع جميع الملفات المطلوبة")
 
 if __name__ == "__main__":
     main()
