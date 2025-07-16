@@ -19,8 +19,9 @@ def calculate_metrics(df_report1, df_report2, df_hc):
     chats_urdu = df_combined['Urdu_Chats'].sum() if 'Urdu_Chats' in df_combined.columns else 0
     
     # حساب النسب المئوية
-    pass_rate = (df_combined['Pass'].sum() / df_combined['Chats'].sum()) * 100 if 'Chats' in df_combined.columns else 0
-    fail_rate = (df_combined['Fail'].sum() / df_combined['Chats'].sum()) * 100 if 'Chats' in df_combined.columns else 0
+    total_chats = max(1, df_combined['Chats'].sum()) if 'Chats' in df_combined.columns else 1
+    pass_rate = (df_combined['Pass'].sum() / total_chats) * 100 if 'Pass' in df_combined.columns else 0
+    fail_rate = (df_combined['Fail'].sum() / total_chats) * 100 if 'Fail' in df_combined.columns else 0
     
     return {
         'aht_score': aht_score,
@@ -74,7 +75,7 @@ def create_excel_report(data, output_path):
     view_sheet.cell(row=2, column=9, value=data['var_from_target']).number_format = '0.00'
     view_sheet.cell(row=2, column=24, value=data['chats_arabic'] + data['chats_urdu'])
     view_sheet.cell(row=2, column=25, value=round((data['pass_rate']/100) * (data['chats_arabic'] + data['chats_urdu'])))
-    view_sheet.cell(row=2, column=26, value=round((data['fail_rate']/100) * (data['chats_arabic'] + data['chats_urdu']))
+    view_sheet.cell(row=2, column=26, value=round((data['fail_rate']/100) * (data['chats_arabic'] + data['chats_urdu'])))
     
     # قسم BPO (مثال)
     view_sheet.cell(row=26, column=4, value=data['aht_score']).number_format = '0.00'
