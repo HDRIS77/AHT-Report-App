@@ -1,141 +1,108 @@
 import streamlit as st
 import pandas as pd
 import io
+import numpy as np
 
 # --- Main App Logic ---
+st.set_page_config(page_title="Final Report Generator", layout="wide")
 
-st.set_page_config(page_title="AHT Report Generator", layout="wide")
+st.title("📈 مولد تقارير الأداء النهائي")
+st.write("ارفع ملفات البيانات الخام، ملف الأردو، وأدخل الرقم المستهدف لإنشاء التقرير.")
 
-st.title("📈 مولد تقارير الأداء التلقائي")
-st.write("ارفع ملفات البيانات الخام وملف الموظفين (HC) لإنشاء التقرير النهائي.")
+# --- Step 1: File Uploaders and Target Input ---
+uploaded_overall = st.file_uploader("1. ارفع ملف البيانات الشامل (Raw Overall)", type=["xlsx", "xls"])
+uploaded_urdu = st.file_uploader("2. ارفع ملف بيانات الأردو (Raw Urdu)", type=["xlsx", "xls"])
+aht_target = st.number_input("3. أدخل الرقم المستهدف للـ AHT (مثلاً: 450)", value=450)
 
-# --- Step 1: File Uploaders ---
-uploaded_raw_data = st.file_uploader(
-    "1. ارفع ملف أو أكثر من ملفات بيانات المحادثات الخام",
-    type=["xlsx", "xls", "csv"],
-    accept_multiple_files=True
-)
 
-uploaded_hc_data = st.file_uploader(
-    "2. ارفع ملف بيانات الموظفين (HC)",
-    type=["xlsx", "xls", "csv"]
-)
-
-# --- Step 2: Process files when both are uploaded ---
-if uploaded_raw_data and uploaded_hc_data:
+# --- Step 2: Process files when all inputs are ready ---
+if uploaded_overall is not None and uploaded_urdu is not None:
     try:
-        # --- Robust file reading function ---
-        def read_uploaded_file(file, file_type_name):
-            """Tries to read an uploaded file, providing specific error feedback."""
-            try:
-                # First, try to read as an Excel file
-                return pd.read_excel(file)
-            except Exception as e1:
-                st.warning(f"لم يتمكن من قراءة '{file.name}' كملف إكسل. يحاول الآن قراءته كملف CSV...")
-                file.seek(0)
-                try:
-                    # Try reading as CSV with robust settings
-                    return pd.read_csv(file, encoding='windows-1256', sep=',', on_bad_lines='skip', engine='python')
-                except Exception as e2:
-                    st.error(f"فشل في قراءة الملف '{file.name}' ({file_type_name}). قد يكون الملف تالفًا. جرب فتحه في Excel وإعادة حفظه.")
-                    st.error(f"تفاصيل الخطأ: {e2}")
-                    return None
+        # Read uploaded files
+        df_overall = pd.read_excel(uploaded_overall)
+        df_urdu = pd.read_excel(uploaded_urdu)
+        st.success("تم قراءة الملفات بنجاح. جاري حساب التقرير...")
 
-        # --- Process multiple raw data files ---
-        all_raw_data_dfs = []
-        st.write("--- قراءة ملفات البيانات الخام ---")
-        all_raw_files_valid = True
-        for file in uploaded_raw_data:
-            df_single_raw = read_uploaded_file(file, "بيانات خام")
-            if df_single_raw is None:
-                all_raw_files_valid = False
-                break 
-            all_raw_data_dfs.append(df_single_raw)
+        # --- Step 3: Define Column Mapping ---
+        column_map = {
+            'C': 'Country', 'H': 'FRT', 'AC': 'Pass/Fail', 'AD': 'Team leader',
+            'AF': 'Agent Status', 'AH': 'Total_Time', 'AI': 'Releasing',
+            'AJ': 'ZTP', 'AK': 'Missed', 'AO': 'language'
+        }
         
-        # --- Read the single HC data file ---
-        df_hc = read_uploaded_file(uploaded_hc_data, "بيانات الموظفين")
+        def rename_cols_by_position(df, mapping):
+            col_indices = {chr(ord('A') + i): i for i in range(26)}
+            for i in range(26): col_indices['A' + chr(ord('A') + i)] = 26 + i
+            rename_dict = {}
+            for letter, name in mapping.items():
+                if letter in col_indices and col_indices[letter] < len(df.columns):
+                    rename_dict[df.columns[col_indices[letter]]] = name
+            df.rename(columns=rename_dict, inplace=True)
+            return df
 
-        # --- Proceed only if all files are read successfully ---
-        if all_raw_files_valid and df_hc is not None:
-            df_raw = pd.concat(all_raw_data_dfs, ignore_index=True)
-            st.success("تم دمج جميع ملفات البيانات بنجاح.")
-            st.success(f"تم تحميل ملف بيانات الموظفين ({uploaded_hc_data.name}) بنجاح.")
+        df_overall = rename_cols_by_position(df_overall, column_map)
+        df_urdu = rename_cols_by_position(df_urdu, {'AD': 'Team leader', 'AH': 'Total_Time'})
 
-            df_hc_original = df_hc.copy()
-            df_hc.columns = df_hc.columns.str.strip()
-            column_mapping = {'Email': 'agent_email', 'TL': 'Team leader', 'SPV': 'Supervisor'}
-            df_hc.rename(columns=column_mapping, inplace=True)
+        # --- Step 4: Perform Calculations ---
+        all_team_leaders = pd.concat([df_overall['Team leader'], df_urdu['Team leader']]).dropna().unique()
+        df_view = pd.DataFrame({'Team leader': all_team_leaders})
 
-            required_hc_columns = ['agent_email', 'Team leader', 'Supervisor']
-            if not all(col in df_hc.columns for col in required_hc_columns):
-                st.error(f"خطأ: ملف HC يجب أن يحتوي على الأعمدة التالية بعد إعادة التسمية: {required_hc_columns}")
-            else:
-                # --- Step 3: Merge Data and Calculate Metrics ---
-                df_merged = pd.merge(df_raw, df_hc, on='agent_email', how='left')
+        df_view['Urdu'] = df_view['Team leader'].map(df_urdu.groupby('Team leader')['Total_Time'].mean())
+        arabic_data = df_overall[df_overall['language'] == 'Arabic']
+        df_view['Arabic'] = df_view['Team leader'].map(arabic_data.groupby('Team leader')['Total_Time'].mean())
+        df_view['Over all AHT Score'] = df_view['Team leader'].map(df_overall.groupby('Team leader')['Total_Time'].mean())
+        production_data = df_overall[df_overall['Agent Status'] == 'Production']
+        df_view['Tenured AHT'] = df_view['Team leader'].map(production_data.groupby('Team leader')['Total_Time'].mean())
+        nesting_data = df_overall[df_overall['Agent Status'] == 'Nesting']
+        df_view['Nesting AHT'] = df_view['Team leader'].map(nesting_data.groupby('Team leader')['Total_Time'].mean())
+        df_view['# Chats Arabic'] = df_view['Team leader'].map(arabic_data.groupby('Team leader').size())
+        df_view['# Chats Urdu'] = df_view['Team leader'].map(df_urdu.groupby('Team leader').size())
+        df_view['Var From Target'] = df_view['Over all AHT Score'] - aht_target
+        df_view['Var From Target'] = df_view['Var From Target'].apply(lambda x: x if x > 0 else np.nan)
+        df_view['Status'] = np.where(df_view['Var From Target'].isna(), 'Achieved', 'Not Achieved')
+        df_view['FRT'] = df_view['Team leader'].map(df_overall.groupby('Team leader')['FRT'].mean())
+        
+        country_pivot = df_overall.pivot_table(index='Team leader', columns='Country', values='Total_Time', aggfunc='mean')
+        df_view = pd.merge(df_view, country_pivot, on='Team leader', how='left')
+        
+        df_view['Releasing'] = df_view['Team leader'].map(df_overall[df_overall['Releasing'] == 'Releasing'].groupby('Team leader').size())
+        df_view['ZTP'] = df_view['Team leader'].map(df_overall[df_overall['ZTP'] == 'ZTP'].groupby('Team leader').size())
+        df_view['Missed'] = df_view['Team leader'].map(df_overall[df_overall['Missed'] == 'Missed'].groupby('Team leader').size())
+        df_view['Chats'] = df_view['Team leader'].map(df_overall.groupby('Team leader').size())
+        df_view['Pass'] = df_view['Team leader'].map(df_overall[df_overall['Pass/Fail'] == 'Pass'].groupby('Team leader').size())
+        df_view['Fail'] = df_view['Team leader'].map(df_overall[df_overall['Pass/Fail'] == 'Fail'].groupby('Team leader').size())
+        
+        df_view.fillna('-', inplace=True)
+        df_view = df_view.round(2)
 
-                # --- FIX: Convert time columns to numeric BEFORE aggregation ---
-                # This ensures that any non-numeric values (like text) become NaN, then are filled with 0.
-                df_merged['handling_time'] = pd.to_numeric(df_merged['handling_time'], errors='coerce').fillna(0)
-                df_merged['wrap_up_time'] = pd.to_numeric(df_merged['wrap_up_time'], errors='coerce').fillna(0)
-                if 'agent_first_reply_time' in df_merged.columns:
-                    df_merged['agent_first_reply_time'] = pd.to_numeric(df_merged['agent_first_reply_time'], errors='coerce').fillna(0)
+        # --- Step 5: Display results and provide download button ---
+        st.subheader("معاينة للنتائج (View)")
+        st.dataframe(df_view)
 
-                count_col = 'chat_id' if 'chat_id' in df_merged.columns else 'handling_time'
-                agg_dict = {
-                    'handling_time': ('handling_time', 'sum'),
-                    'wrap_up_time': ('wrap_up_time', 'sum'),
-                    count_col: (count_col, 'count')
-                }
-                if 'agent_first_reply_time' in df_merged.columns: agg_dict['FRT'] = ('agent_first_reply_time', 'mean')
-                
-                df_agent_view = df_merged.groupby(['Team leader', 'Supervisor', 'agent_email']).agg(**agg_dict).reset_index()
-                df_agent_view.rename(columns={count_col: 'Total Chats'}, inplace=True)
-                df_agent_view['AHT'] = ((df_agent_view['handling_time'] + df_agent_view['wrap_up_time']) / df_agent_view['Total Chats']).round(2)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df_view.to_excel(writer, sheet_name='View', index=False)
 
-                final_cols = ['Team leader', 'agent_email', 'Total Chats', 'AHT', 'FRT']
-                for col in final_cols:
-                    if col not in df_agent_view.columns: df_agent_view[col] = 0
-                df_agent_view = df_agent_view[final_cols]
+            workbook = writer.book
+            header_format = workbook.add_format({'bold': True, 'valign': 'top', 'fg_color': '#002060', 'font_color': 'white', 'border': 1, 'align': 'center'})
+            cell_format = workbook.add_format({'border': 1, 'align': 'center'})
+            green_format = workbook.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'border': 1, 'align': 'center'})
+            red_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'border': 1, 'align': 'center'})
 
-                df_view = df_agent_view.groupby('Team leader').agg({
-                    'Total Chats': 'sum', 'AHT': 'mean', 'FRT': 'mean'
-                }).reset_index()
-                df_view['AHT'] = df_view['AHT'].round(2)
+            worksheet = writer.sheets['View']
+            worksheet.set_default_row(18)
+            for col_num, value in enumerate(df_view.columns.values):
+                worksheet.write(0, col_num, value, header_format)
+            worksheet.set_column('A:AZ', 12, cell_format)
+            worksheet.conditional_format('I2:I100', {'type': 'cell', 'criteria': '==', 'value': '"Achieved"', 'format': green_format})
+            worksheet.conditional_format('I2:I100', {'type': 'cell', 'criteria': '==', 'value': '"Not Achieved"', 'format': red_format})
 
-                # --- Step 4: Display results and provide download button ---
-                st.subheader("معاينة للنتائج")
-                st.write("**ملخص قادة الفرق (View)**")
-                st.dataframe(df_view)
-                st.write("**التقرير التفصيلي للموظفين (Agent View)**")
-                st.dataframe(df_agent_view)
-
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df_view.to_excel(writer, sheet_name='View', index=False)
-                    df_agent_view.to_excel(writer, sheet_name='Agent View', index=False)
-                    df_hc_original.to_excel(writer, sheet_name='HC', index=False)
-
-                    workbook = writer.book
-                    header_format = workbook.add_format({'bold': True, 'text_wrap': True, 'valign': 'top', 'fg_color': '#4472C4', 'font_color': 'white', 'border': 1})
-                    
-                    worksheet_view = writer.sheets['View']
-                    for c, v in enumerate(df_view.columns.values): worksheet_view.write(0, c, v, header_format)
-                    worksheet_view.set_column('A:E', 18)
-
-                    worksheet_agent = writer.sheets['Agent View']
-                    for c, v in enumerate(df_agent_view.columns.values): worksheet_agent.write(0, c, v, header_format)
-                    worksheet_agent.set_column('A:E', 18)
-                    
-                    worksheet_hc = writer.sheets['HC']
-                    for c, v in enumerate(df_hc_original.columns.values): worksheet_hc.write(0, c, v, header_format)
-                    worksheet_hc.set_column('A:Z', 18)
-
-                st.download_button(
-                    label="⬇️ تحميل التقرير النهائي",
-                    data=output.getvalue(),
-                    file_name="Final_Performance_Report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+        st.download_button(
+            label="⬇️ تحميل التقرير النهائي",
+            data=output.getvalue(),
+            file_name="Final_Performance_Report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     except Exception as e:
-        st.error(f"حدث خطأ غير متوقع بعد قراءة الملفات: {e}")
+        st.error(f"حدث خطأ غير متوقع: {e}")
