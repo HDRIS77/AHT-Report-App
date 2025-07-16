@@ -66,14 +66,26 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
             # --- Step 4: Perform Calculations for BOTH sheets ---
             
             # --- CALCULATIONS FOR "AGENT VIEW" SHEET ---
-            df_agent_view = df_merged.groupby(['agent_email']).agg(
-                Total_Chats=pd.NamedAgg(column='agent_email', aggfunc='count'),
-                Total_Time=pd.NamedAgg(column='Total_Time', aggfunc='sum'),
-                Pass=pd.NamedAgg(column='Pass/Fail', aggfunc=lambda x: (x == 'Pass').sum()),
-                Fail=pd.NamedAgg(column='Pass/Fail', aggfunc=lambda x: (x == 'Fail').sum())
-            ).reset_index()
+            # Start with a base aggregation dictionary
+            agg_dict = {
+                'Total_Time': pd.NamedAgg(column='Total_Time', aggfunc='sum'),
+                'agent_email': pd.NamedAgg(column='agent_email', aggfunc='count')
+            }
+            # Dynamically add Pass/Fail aggregation if the column exists
+            if 'Pass/Fail' in df_merged.columns:
+                agg_dict['Pass'] = pd.NamedAgg(column='Pass/Fail', aggfunc=lambda x: (x == 'Pass').sum())
+                agg_dict['Fail'] = pd.NamedAgg(column='Pass/Fail', aggfunc=lambda x: (x == 'Fail').sum())
 
-            df_agent_view['AHT Score'] = (df_agent_view['Total_Time'] / df_agent_view['Total_Chats']).round(2)
+            df_agent_view = df_merged.groupby(['agent_email']).agg(**agg_dict).reset_index()
+            df_agent_view.rename(columns={'agent_email': 'Email', 'agent_email_count': 'Total_Chats'}, inplace=True)
+
+            # Ensure Pass/Fail columns exist before calculations
+            if 'Pass' not in df_agent_view.columns: df_agent_view['Pass'] = 0
+            if 'Fail' not in df_agent_view.columns: df_agent_view['Fail'] = 0
+            
+            df_agent_view.rename(columns={'Email': 'agent_email', 'Total_Chats': '# Chats'}, inplace=True)
+
+            df_agent_view['AHT Score'] = (df_agent_view['Total_Time'] / df_agent_view['# Chats']).round(2)
             df_agent_view['Var from Target'] = df_agent_view['AHT Score'] - aht_target
             df_agent_view['Var from Target'] = df_agent_view['Var from Target'].apply(lambda x: x if x > 0 else np.nan)
             df_agent_view['Status'] = np.where(df_agent_view['Var from Target'].isna(), 'Achieved', 'Not Achieved')
@@ -84,7 +96,7 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
             
             # Reorder and select final columns for Agent View
             agent_view_cols = ['HR ID', 'Full Name', 'Email', 'TL', 'SPV', 'AHT Score', '# Chats', 'Var from Target', 'Status', 'Pass', 'Fail', 'Readiness']
-            df_agent_view.rename(columns={'agent_email': 'Email', 'Team leader': 'TL', 'Supervisor': 'SPV', 'Total_Chats': '# Chats'}, inplace=True)
+            df_agent_view.rename(columns={'agent_email': 'Email', 'Team leader': 'TL', 'Supervisor': 'SPV'}, inplace=True)
             for col in agent_view_cols:
                 if col not in df_agent_view.columns:
                     df_agent_view[col] = '-'
@@ -95,10 +107,9 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
             all_team_leaders = df_merged['Team leader'].dropna().unique()
             df_view = pd.DataFrame({'Team leader': all_team_leaders})
             
+            # ... (Add all calculations for the View sheet here, checking for column existence) ...
+            # This part needs to be fully built out to match the image
             df_view['Over all AHT Score'] = df_view['Team leader'].map(df_merged.groupby('Team leader')['Total_Time'].mean())
-            # ... (Add all other calculations for the View sheet as before) ...
-            df_view.fillna('-', inplace=True)
-            df_view = df_view.round(2)
 
 
             # --- Step 5: Display results and provide download button ---
