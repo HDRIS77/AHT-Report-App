@@ -66,30 +66,30 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
             # --- Step 4: Perform Calculations for BOTH sheets ---
             
             # --- CALCULATIONS FOR "AGENT VIEW" SHEET ---
-            # Start with a base aggregation dictionary
+            # FIX: Use a different column for counting to avoid name conflict
             agg_dict = {
                 'Total_Time': pd.NamedAgg(column='Total_Time', aggfunc='sum'),
-                'agent_email': pd.NamedAgg(column='agent_email', aggfunc='count')
+                '# Chats': pd.NamedAgg(column='Total_Time', aggfunc='count') # Count using a non-grouping column
             }
-            # Dynamically add Pass/Fail aggregation if the column exists
             if 'Pass/Fail' in df_merged.columns:
                 agg_dict['Pass'] = pd.NamedAgg(column='Pass/Fail', aggfunc=lambda x: (x == 'Pass').sum())
                 agg_dict['Fail'] = pd.NamedAgg(column='Pass/Fail', aggfunc=lambda x: (x == 'Fail').sum())
 
             df_agent_view = df_merged.groupby(['agent_email']).agg(**agg_dict).reset_index()
-            df_agent_view.rename(columns={'agent_email': 'Email', 'agent_email_count': 'Total_Chats'}, inplace=True)
 
             # Ensure Pass/Fail columns exist before calculations
             if 'Pass' not in df_agent_view.columns: df_agent_view['Pass'] = 0
             if 'Fail' not in df_agent_view.columns: df_agent_view['Fail'] = 0
             
-            df_agent_view.rename(columns={'Email': 'agent_email', 'Total_Chats': '# Chats'}, inplace=True)
-
             df_agent_view['AHT Score'] = (df_agent_view['Total_Time'] / df_agent_view['# Chats']).round(2)
             df_agent_view['Var from Target'] = df_agent_view['AHT Score'] - aht_target
             df_agent_view['Var from Target'] = df_agent_view['Var from Target'].apply(lambda x: x if x > 0 else np.nan)
             df_agent_view['Status'] = np.where(df_agent_view['Var from Target'].isna(), 'Achieved', 'Not Achieved')
-            df_agent_view['Readiness'] = (df_agent_view['Pass'] / (df_agent_view['Pass'] + df_agent_view['Fail'])).fillna(0)
+            
+            # Calculate Readiness, avoiding division by zero
+            total_pass_fail = df_agent_view['Pass'] + df_agent_view['Fail']
+            df_agent_view['Readiness'] = np.where(total_pass_fail > 0, df_agent_view['Pass'] / total_pass_fail, 0)
+
 
             # Merge with HC data to get agent info
             df_agent_view = pd.merge(df_hc, df_agent_view, on='agent_email', how='left')
@@ -107,9 +107,8 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
             all_team_leaders = df_merged['Team leader'].dropna().unique()
             df_view = pd.DataFrame({'Team leader': all_team_leaders})
             
-            # ... (Add all calculations for the View sheet here, checking for column existence) ...
-            # This part needs to be fully built out to match the image
             df_view['Over all AHT Score'] = df_view['Team leader'].map(df_merged.groupby('Team leader')['Total_Time'].mean())
+            # ... (Add all other calculations for the View sheet here, checking for column existence) ...
 
 
             # --- Step 5: Display results and provide download button ---
@@ -134,6 +133,7 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
                 green_format = workbook.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'border': 1, 'align': 'center'})
                 red_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'border': 1, 'align': 'center'})
                 yellow_format = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C6500', 'border': 1, 'align': 'center'})
+                percent_format = workbook.add_format({'num_format': '0.0%', 'border': 1, 'align': 'center'})
 
                 # --- Format "View" Sheet ---
                 worksheet_view = writer.sheets['View']
@@ -148,6 +148,7 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
                 for col_num, value in enumerate(df_agent_view.columns.values):
                     worksheet_agent.write(0, col_num, value, header_format_agent)
                 worksheet_agent.set_column('A:L', 18, cell_format)
+                worksheet_agent.set_column('L:L', 18, percent_format) # Format Readiness as percentage
                 worksheet_agent.conditional_format('I2:I100', {'type': 'cell', 'criteria': '==', 'value': '"Achieved"', 'format': green_format})
                 worksheet_agent.conditional_format('I2:I100', {'type': 'cell', 'criteria': '==', 'value': '"Not Achieved"', 'format': red_format})
                 worksheet_agent.conditional_format('L2:L100', {'type': '3_color_scale', 'min_value': 0, 'mid_value': 0.8, 'max_value': 1, 'min_color': '#F8696B', 'mid_color': '#FFEB84', 'max_color': '#63BE7B'})
