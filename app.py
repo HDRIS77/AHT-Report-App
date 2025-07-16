@@ -55,7 +55,7 @@ if uploaded_raw_data and uploaded_hc_data:
         # --- Read the single HC data file ---
         df_hc = read_uploaded_file(uploaded_hc_data, "بيانات الموظفين")
 
-        # --- NEW: Proceed only if all files are read successfully ---
+        # --- Proceed only if all files are read successfully ---
         if all_raw_files_valid and df_hc is not None:
             df_raw = pd.concat(all_raw_data_dfs, ignore_index=True)
             st.success("تم دمج جميع ملفات البيانات بنجاح.")
@@ -72,6 +72,13 @@ if uploaded_raw_data and uploaded_hc_data:
             else:
                 # --- Step 3: Merge Data and Calculate Metrics ---
                 df_merged = pd.merge(df_raw, df_hc, on='agent_email', how='left')
+
+                # --- FIX: Convert time columns to numeric BEFORE aggregation ---
+                # This ensures that any non-numeric values (like text) become NaN, then are filled with 0.
+                df_merged['handling_time'] = pd.to_numeric(df_merged['handling_time'], errors='coerce').fillna(0)
+                df_merged['wrap_up_time'] = pd.to_numeric(df_merged['wrap_up_time'], errors='coerce').fillna(0)
+                if 'agent_first_reply_time' in df_merged.columns:
+                    df_merged['agent_first_reply_time'] = pd.to_numeric(df_merged['agent_first_reply_time'], errors='coerce').fillna(0)
 
                 count_col = 'chat_id' if 'chat_id' in df_merged.columns else 'handling_time'
                 agg_dict = {
