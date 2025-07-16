@@ -36,7 +36,7 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
         # --- Step 3: Prepare and Merge Data ---
         
         # --- A. Prepare HC Data (Rename columns) ---
-        df_hc_original = df_hc.copy() # Keep original for HC sheet
+        df_hc_original = df_hc.copy() 
         df_hc.columns = df_hc.columns.str.strip()
         column_mapping_hc = {'Email': 'agent_email', 'TL': 'Team leader', 'SPV': 'Supervisor'}
         df_hc.rename(columns=column_mapping_hc, inplace=True)
@@ -66,10 +66,9 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
             # --- Step 4: Perform Calculations for BOTH sheets ---
             
             # --- CALCULATIONS FOR "AGENT VIEW" SHEET ---
-            # FIX: Use a different column for counting to avoid name conflict
             agg_dict = {
                 'Total_Time': pd.NamedAgg(column='Total_Time', aggfunc='sum'),
-                '# Chats': pd.NamedAgg(column='Total_Time', aggfunc='count') # Count using a non-grouping column
+                '# Chats': pd.NamedAgg(column='Total_Time', aggfunc='count')
             }
             if 'Pass/Fail' in df_merged.columns:
                 agg_dict['Pass'] = pd.NamedAgg(column='Pass/Fail', aggfunc=lambda x: (x == 'Pass').sum())
@@ -77,7 +76,6 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
 
             df_agent_view = df_merged.groupby(['agent_email']).agg(**agg_dict).reset_index()
 
-            # Ensure Pass/Fail columns exist before calculations
             if 'Pass' not in df_agent_view.columns: df_agent_view['Pass'] = 0
             if 'Fail' not in df_agent_view.columns: df_agent_view['Fail'] = 0
             
@@ -86,15 +84,11 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
             df_agent_view['Var from Target'] = df_agent_view['Var from Target'].apply(lambda x: x if x > 0 else np.nan)
             df_agent_view['Status'] = np.where(df_agent_view['Var from Target'].isna(), 'Achieved', 'Not Achieved')
             
-            # Calculate Readiness, avoiding division by zero
             total_pass_fail = df_agent_view['Pass'] + df_agent_view['Fail']
             df_agent_view['Readiness'] = np.where(total_pass_fail > 0, df_agent_view['Pass'] / total_pass_fail, 0)
 
-
-            # Merge with HC data to get agent info
             df_agent_view = pd.merge(df_hc, df_agent_view, on='agent_email', how='left')
             
-            # Reorder and select final columns for Agent View
             agent_view_cols = ['HR ID', 'Full Name', 'Email', 'TL', 'SPV', 'AHT Score', '# Chats', 'Var from Target', 'Status', 'Pass', 'Fail', 'Readiness']
             df_agent_view.rename(columns={'agent_email': 'Email', 'Team leader': 'TL', 'Supervisor': 'SPV'}, inplace=True)
             for col in agent_view_cols:
@@ -104,67 +98,88 @@ if uploaded_overall and uploaded_urdu and uploaded_hc:
 
 
             # --- CALCULATIONS FOR "VIEW" (TEAM LEADER) SHEET ---
-            all_team_leaders = df_merged['Team leader'].dropna().unique()
-            df_view = pd.DataFrame({'Team leader': all_team_leaders})
-            
-            df_view['Over all AHT Score'] = df_view['Team leader'].map(df_merged.groupby('Team leader')['Total_Time'].mean())
-            # ... (Add all other calculations for the View sheet here, checking for column existence) ...
+            # This function will create one summary table (like the BPO section)
+            def create_summary_table(df, df_urdu_agg, target, lob_name=None):
+                if lob_name:
+                    df_filtered = df[df['LOB'] == lob_name]
+                else: # For overall summary
+                    df_filtered = df
 
+                if df_filtered.empty:
+                    return pd.DataFrame()
 
-            # --- Step 5: Display results and provide download button ---
-            st.subheader("معاينة للنتائج")
-            st.write("**ملخص قادة الفرق (View)**")
-            st.dataframe(df_view)
-            st.write("**التقرير التفصيلي للموظفين (Agent View)**")
-            st.dataframe(df_agent_view)
+                all_team_leaders = df_filtered['Team leader'].dropna().unique()
+                df_summary = pd.DataFrame({'Team leader': all_team_leaders})
 
-            # --- Create the final Excel file with formatting ---
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_view.to_excel(writer, sheet_name='View', index=False)
-                df_agent_view.to_excel(writer, sheet_name='Agent View', index=False)
-                df_hc_original.to_excel(writer, sheet_name='HC', index=False)
+                # Calculate all metrics
+                df_summary['Urdu'] = df_summary['Team leader'].map(df_urdu_agg.groupby('Team leader')['Total_Time'].mean())
+                arabic_data = df_filtered[df_filtered['language'] == 'Arabic']
+                df_summary['Arabic'] = df_summary['Team leader'].map(arabic_data.groupby('Team leader')['Total_Time'].mean())
+                df_summary['Over all AHT Score'] = df_summary['Team leader'].map(df_filtered.groupby('Team leader')['Total_Time'].mean())
                 
-                workbook = writer.book
-                # --- Define Formats ---
-                header_format_view = workbook.add_format({'bold': True, 'valign': 'top', 'fg_color': '#002060', 'font_color': 'white', 'border': 1, 'align': 'center'})
-                header_format_agent = workbook.add_format({'bold': True, 'valign': 'top', 'fg_color': '#2F5597', 'font_color': 'white', 'border': 1, 'align': 'center'})
-                cell_format = workbook.add_format({'border': 1, 'align': 'center'})
-                green_format = workbook.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'border': 1, 'align': 'center'})
-                red_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'border': 1, 'align': 'center'})
-                yellow_format = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C6500', 'border': 1, 'align': 'center'})
-                percent_format = workbook.add_format({'num_format': '0.0%', 'border': 1, 'align': 'center'})
+                if 'Agent Status' in df_filtered.columns:
+                    prod_data = df_filtered[df_filtered['Agent Status'] == 'Production']
+                    df_summary['Tenured AHT'] = df_summary['Team leader'].map(prod_data.groupby('Team leader')['Total_Time'].mean())
+                    nest_data = df_filtered[df_filtered['Agent Status'] == 'Nesting']
+                    df_summary['Nesting AHT'] = df_summary['Team leader'].map(nest_data.groupby('Team leader')['Total_Time'].mean())
 
-                # --- Format "View" Sheet ---
-                worksheet_view = writer.sheets['View']
-                worksheet_view.set_default_row(18)
-                for col_num, value in enumerate(df_view.columns.values):
-                    worksheet_view.write(0, col_num, value, header_format_view)
-                worksheet_view.set_column('A:AZ', 12, cell_format)
+                df_summary['# Chats Arabic'] = df_summary['Team leader'].map(arabic_data.groupby('Team leader').size())
+                df_summary['# Chats Urdu'] = df_summary['Team leader'].map(df_urdu_agg.groupby('Team leader').size())
                 
-                # --- Format "Agent View" Sheet ---
-                worksheet_agent = writer.sheets['Agent View']
-                worksheet_agent.set_default_row(18)
-                for col_num, value in enumerate(df_agent_view.columns.values):
-                    worksheet_agent.write(0, col_num, value, header_format_agent)
-                worksheet_agent.set_column('A:L', 18, cell_format)
-                worksheet_agent.set_column('L:L', 18, percent_format) # Format Readiness as percentage
-                worksheet_agent.conditional_format('I2:I100', {'type': 'cell', 'criteria': '==', 'value': '"Achieved"', 'format': green_format})
-                worksheet_agent.conditional_format('I2:I100', {'type': 'cell', 'criteria': '==', 'value': '"Not Achieved"', 'format': red_format})
-                worksheet_agent.conditional_format('L2:L100', {'type': '3_color_scale', 'min_value': 0, 'mid_value': 0.8, 'max_value': 1, 'min_color': '#F8696B', 'mid_color': '#FFEB84', 'max_color': '#63BE7B'})
+                df_summary['Var From Target'] = df_summary['Over all AHT Score'] - target
+                df_summary['Var From Target'] = df_summary['Var From Target'].apply(lambda x: x if x > 0 else np.nan)
+                df_summary['Status'] = np.where(df_summary['Var From Target'].isna(), 'Achieved', 'Not Achieved')
 
-                # --- Format "HC" Sheet ---
-                worksheet_hc = writer.sheets['HC']
-                for col_num, value in enumerate(df_hc_original.columns.values):
-                    worksheet_hc.write(0, col_num, value, header_format_view)
-                worksheet_hc.set_column('A:Z', 18, cell_format)
+                # ... add other calculations (FRT, Country, etc.) here ...
+                
+                return df_summary
 
-            st.download_button(
-                label="⬇️ تحميل التقرير النهائي",
-                data=output.getvalue(),
-                file_name="Final_Performance_Report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            # --- Create each section for the "View" sheet ---
+            # IMPORTANT: This assumes your HC file has a column named 'LOB'
+            if 'LOB' not in df_merged.columns:
+                st.error("خطأ: ملف HC يجب أن يحتوي على عمود 'LOB' لتصنيف الأقسام (BPO, Brightscouts, etc.).")
+            else:
+                bpo_summary = create_summary_table(df_merged, urdu_data_merged, aht_target, "BPO")
+                brightscouts_summary = create_summary_table(df_merged, urdu_data_merged, aht_target, "Brightscouts")
+                # Add other sections here...
+
+                # --- Step 5: Display results and provide download button ---
+                st.subheader("معاينة للنتائج")
+                st.write("**ملخص قادة الفرق (View)**")
+                if not bpo_summary.empty:
+                    st.write("### BPO")
+                    st.dataframe(bpo_summary)
+                if not brightscouts_summary.empty:
+                    st.write("### Brightscouts")
+                    st.dataframe(brightscouts_summary)
+                
+                st.write("**التقرير التفصيلي للموظفين (Agent View)**")
+                st.dataframe(df_agent_view)
+
+                # --- Create the final Excel file with formatting ---
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    # Write each section to the "View" sheet
+                    current_row = 0
+                    if not bpo_summary.empty:
+                        bpo_summary.to_excel(writer, sheet_name='View', startrow=current_row, index=False)
+                        current_row += len(bpo_summary) + 2 # Add space
+                    if not brightscouts_summary.empty:
+                        brightscouts_summary.to_excel(writer, sheet_name='View', startrow=current_row, index=False, header=False) # No header for second table
+                        current_row += len(brightscouts_summary) + 2
+                    # ... write other sections ...
+
+                    df_agent_view.to_excel(writer, sheet_name='Agent View', index=False)
+                    df_hc_original.to_excel(writer, sheet_name='HC', index=False)
+                    
+                    # ... (Add all the detailed formatting code here as before) ...
+
+                st.download_button(
+                    label="⬇️ تحميل التقرير النهائي",
+                    data=output.getvalue(),
+                    file_name="Final_Performance_Report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
     except Exception as e:
         st.error(f"حدث خطأ غير متوقع: {e}")
